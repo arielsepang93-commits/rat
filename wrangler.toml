@@ -1,0 +1,3 @@
+name = "rat"
+main = "server.js"
+compatibility_date = "2023-10-01"
